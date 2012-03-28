@@ -274,6 +274,7 @@ typedef struct smbnode {
 #define	NFLUSHINPROG	0x00001
 #define	NFLUSHWANT	0x00002 /* they should gone ... */
 #define	NMODIFIED	0x00004 /* bogus, until async IO implemented */
+#define NUNLINK		0x00008 /* this file need be unlinked */
 #define	NREFPARENT	0x00010 /* node holds parent from recycling */
 #define	NGOTIDS		0x00020
 #define	NRDIRSERIAL	0x00080	/* serialize readdir operation */

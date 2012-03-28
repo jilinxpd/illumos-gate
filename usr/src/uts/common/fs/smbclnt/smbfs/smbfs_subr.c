@@ -55,6 +55,56 @@
 #include <smbfs/smbfs_node.h>
 #include <smbfs/smbfs_subr.h>
 
+
+
+
+/*
+ * Create a random number.
+ * used in newname().
+ */
+static int newnum(void)
+{
+    static kmutex_t newnum_lock;
+    static int basenum=0;
+	int newnum;
+
+    mutex_enter(&newnum_lock);
+    if(basenum==0)
+        basenum=gethrestime_sec()&0xffff;
+	newnum=++basenum;
+	mutex_exit(&newnum_lock);
+
+    return (newnum);
+}
+
+/*
+ * Create a newname, stored in name, return the name length.
+ */
+void newname(char*name)
+{
+    const char *p;
+    char *q;
+    int idx;
+
+    p=".smbfs";
+    q=name;
+    idx=newnum();
+
+    while(*p!='\0')
+    {
+        *q++=*p++;
+    }
+    while(idx!=0)
+    {
+        *q++="0123456789ABCDEF"[idx&0x0f];
+        idx>>=4;
+    }
+    *q='\0';
+}
+
+
+
+
 /*
  * In the Darwin code, this function used to compute the full path
  * by following the chain of n_parent pointers back to the root.

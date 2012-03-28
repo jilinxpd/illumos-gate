@@ -304,4 +304,8 @@ int smbfs_rw_lock_held(smbfs_rwlock_t *l, krw_t rw);
 void smbfs_rw_init(smbfs_rwlock_t *l, char *name, krw_type_t type, void *arg);
 void smbfs_rw_destroy(smbfs_rwlock_t *l);
 
+/* other functions */
+void newname(char*);
+
+
 #endif /* !_FS_SMBFS_SMBFS_SUBR_H_ */

@@ -539,12 +539,15 @@ smbfs_rele_fid(smbnode_t *np, struct smb_cred *scred)
 		if (--np->n_fidrefs)
 			return;
 		if ((ofid = np->n_fid) != SMB_FID_UNUSED) {
-			np->n_fid = SMB_FID_UNUSED;
 			/* After reconnect, n_fid is invalid */
 			if (np->n_vcgenid == ssp->ss_vcgenid) {
 				error = smbfs_smb_close(
 				    ssp, ofid, NULL, scred);
+        			if (!error&&np->n_flag&NUNLINK){
+                			smbfs_smb_delete(np,scred,NULL,0,0);
+        			}
 			}
+			np->n_fid = SMB_FID_UNUSED;
 		}
 		break;
 
@@ -2058,8 +2061,30 @@ smbfs_remove(vnode_t *dvp, char *nm, cred_t *cr, caller_context_t *ct,
 		 * if that fails, ask the server to
 		 * set the delete-on-close flag.
 		 */
+
+		/* try to rename it instead of remove.*/
 		mutex_exit(&np->r_statelock);
-		error = EBUSY;
+
+		char *tmppath=kmem_alloc(MAXNAMELEN,KM_SLEEP);
+		char *tmpname=tmppath+dnp->n_rplen+1;
+		newname(tmpname);
+		error=smbfsrename(dvp,nm,dvp,tmpname,cr,ct);
+		if(error){
+    			kmem_free(tmppath,MAXNAMELEN);
+		}
+		else{
+			/* add the dir path to tmppath.*/
+			strncpy(tmppath,dnp->n_rpath,dnp->n_rplen);
+			tmppath[dnp->n_rplen]='\\';
+
+			mutex_enter(&np->r_statelock);
+			/*will remove it when the last reference closed*/
+			np->n_flag|=NUNLINK;
+			kmem_free(np->n_rpath,MAXNAMELEN);
+			np->n_rpath=tmppath;
+			np->n_rplen=strlen(tmppath);
+			mutex_exit(&np->r_statelock);
+		}
 	} else {
 		smbfs_attrcache_rm_locked(np);
 		mutex_exit(&np->r_statelock);
@@ -2268,17 +2293,29 @@ smbfsrename(vnode_t *odvp, char *onm, vnode_t *ndvp, char *nnm, cred_t *cr,
 		nnp = VTOSMB(nvp);
 		mutex_enter(&nnp->r_statelock);
 		if ((nvp->v_count > 2) && (nnp->n_fidrefs > 0)) {
-			/*
-			 * The target file exists, is not the same as
-			 * the source file, and is active.  Other FS
-			 * implementations unlink the target here.
-			 * For SMB, we don't assume we can remove an
-			 * open file.  Return an error instead.
-			 */
+		    /*if the target file is active,rename it instead of remove.*/
+		    mutex_exit(&nnp->r_statelock);
+		    char *tmppath=kmem_alloc(MAXNAMELEN,KM_SLEEP);
+		    char *tmpname=tmppath+ndnp->n_rplen+1;
+		    newname(tmpname);
+		    error=smbfs_rename(ndvp,nnm,ndvp,tmpname,cr,NULL,0);
+		    if(error){
+    			kmem_free(tmppath,MAXNAMELEN);
+		    }
+		    else{
+			/* add the dir path to tmppath.*/
+			strncpy(tmppath,ndnp->n_rpath,ndnp->n_rplen);
+			tmppath[ndnp->n_rplen]='\\';
+
+			mutex_enter(&nnp->r_statelock);
+			/*will remove it when the last reference closed*/
+			nnp->n_flag|=NUNLINK;
+			kmem_free(nnp->n_rpath,MAXNAMELEN);
+			nnp->n_rpath=tmppath;
+			nnp->n_rplen=strlen(tmppath);
 			mutex_exit(&nnp->r_statelock);
-			error = EBUSY;
-			goto out;
-		}
+		    }
+		}else{
 
 		/*
 		 * Target file is not active. Try to remove it.
@@ -2291,18 +2328,20 @@ smbfsrename(vnode_t *odvp, char *onm, vnode_t *ndvp, char *nnm, cred_t *cr,
 		/*
 		 * Similar to smbfs_remove
 		 */
-		switch (error) {
-		case 0:
-		case ENOENT:
-		case ENOTDIR:
-			smbfs_attrcache_prune(nnp);
-			break;
+			switch (error) {
+			case 0:
+			case ENOENT:
+			case ENOTDIR:
+				smbfs_attrcache_prune(nnp);
+				break;
+			}
 		}
+
 
 		if (error)
 			goto out;
 		/*
-		 * OK, removed the target file.  Continue as if
+		 * OK, renamed or removed the target file.  Continue as if
 		 * lookup target had failed (nvp == NULL).
 		 */
 		vn_vfsunlock(nvp);
